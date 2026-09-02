@@ -1,0 +1,10 @@
+# Build/test artifacts -- regenerated locally, not something CI or other developers need
+# committed, same reasoning as every other SDK's own .gitignore in this repo.
+blib/
+Makefile
+Makefile.old
+pm_to_blib
+MYMETA.*
+cover_db/
+nytprof.out
+/*.tar.gz
