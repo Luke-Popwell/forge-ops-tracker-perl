@@ -9,29 +9,34 @@ my $MAX_FRAMES = 500;
 
 # How many lines of source to grab on either side of the culprit line (see
 # _attach_source_context), and the longest a single captured line is allowed to be before getting
-# truncated -- guards against a single pathological minified/generated line ballooning the
+# truncated: guards against a single pathological minified/generated line ballooning the
 # payload. ForgeOps itself re-truncates on arrival too, the same "don't just trust the SDK"
 # posture $MAX_FRAMES already gets on the server side.
 my $CONTEXT_LINES = 5;
 my $MAX_CONTEXT_LINE_LENGTH = 500;
+
+# Identifies this client to the server's auto language-detection on the project the event lands
+# in (see Project#note_sdk_platform server-side); matches this repo's own sdks/perl directory
+# name, the same convention every other language's client follows.
+my $SDK_NAME = 'perl';
 
 sub new {
     my ($class, $configuration) = @_;
     return bless { configuration => $configuration }, $class;
 }
 
-# build($error, \%context) -- $error can be:
+# build($error, \%context): $error can be:
 #   - a blessed exception object exposing ->message (or overloaded stringification) and,
 #     optionally, ->trace returning a Devel::StackTrace-compatible object (frames() ->
-#     filename/line/subroutine) -- e.g. Throwable::Error, Moo::Exception-based classes.
-#   - a plain scalar, typically $@ after `die "..."` or `Carp::confess "..."` -- Perl appends
+#     filename/line/subroutine): e.g. Throwable::Error, Moo::Exception-based classes.
+#   - a plain scalar, typically $@ after `die "..."` or `Carp::confess "..."`: Perl appends
 #     " at FILE line N." to any die message that doesn't already end in "\n", and Carp::confess
 #     appends a full "\tPACKAGE::sub(...) called at FILE line N" chain on top of that; both are
 #     parsed below into real backtrace frames rather than left as one opaque string, verified
 #     directly against real confess()/die output before relying on the format, not assumed from
 #     documentation alone.
 sub build {
-    my ($self, $error, $context) = @_;
+    my ($self, $error, $context, $user, $breadcrumbs) = @_;
     $context ||= {};
     my $config = $self->{configuration};
 
@@ -47,7 +52,11 @@ sub build {
         server_name     => $config->{server_name},
         context         => { %$context },
         tags            => {},
+        sdk_name        => $SDK_NAME,
     );
+    $payload{user} = { %$user } if $user && %$user;
+    # Omitted entirely (never sent as an empty array) when there's nothing to report.
+    $payload{breadcrumbs} = [ map { { %$_ } } @$breadcrumbs ] if $breadcrumbs && @$breadcrumbs;
 
     return $config->{scrub_pii} ? $self->_scrub_payload(\%payload) : \%payload;
 }
@@ -86,7 +95,7 @@ sub _parse_die_text {
 
     my @frames;
     my $message = shift @lines;
-    # "MESSAGE at FILE line N." -- what Perl itself appends to any die string not already ending
+    # "MESSAGE at FILE line N.": what Perl itself appends to any die string not already ending
     # in "\n", and the first line Carp::confess/croak produce too.
     if ($message =~ s/\s+at\s+(\S+)\s+line\s+(\d+)\.\s*$//) {
         push @frames, $self->_frame($1, $2, undef);
@@ -126,7 +135,7 @@ sub _in_app {
 
 # Reads a few lines of source straight off disk around the culprit line, at die/confess-time, in
 # the same running process the error came from. Gated on two things: the frame has to be in_app
-# (never a vendored/system library -- there'd be nothing meaningful to show, and it's not the host
+# (never a vendored/system library: there'd be nothing meaningful to show, and it's not the host
 # app's own code to begin with), and configuration's capture_source_context has to be true (see
 # Configuration for why it defaults to true and why ForgeOps' own per-project setting, not this
 # flag, is the durable, protected way to turn it off). Best-effort: any file that can't be opened
@@ -172,6 +181,11 @@ sub _truncate_line {
     return substr($line, 0, $MAX_CONTEXT_LINE_LENGTH) . '...';
 }
 
+# exception_class/occurred_at/environment/release/server_name/sdk_name/user are left alone:
+# structured fields this client or the host app sets deliberately, not free text an exception or
+# its context could accidentally spill sensitive data into. user specifically is a deliberate
+# exemption, not an oversight: scrub_string's own email pattern would otherwise redact the exact
+# thing this field exists to carry (the %scrubbed copy below never touches it either way).
 sub _scrub_payload {
     my ($self, $payload) = @_;
     my %scrubbed = %$payload;
@@ -189,6 +203,19 @@ sub _scrub_payload {
             \%frame;
         } @{ $payload->{backtrace} }
     ];
+    # Breadcrumb message/data are free text the host app or an integration wrote; category, level,
+    # and timestamp are structured values set deliberately, the same split as the top-level
+    # fields above, so they are left alone.
+    if ($payload->{breadcrumbs}) {
+        $scrubbed{breadcrumbs} = [
+            map {
+                my %crumb = %$_;
+                $crumb{message} = scrub_string($crumb{message}) if defined $crumb{message};
+                $crumb{data}    = scrub($crumb{data});
+                \%crumb;
+            } @{ $payload->{breadcrumbs} }
+        ];
+    }
     $scrubbed{context} = scrub($payload->{context});
     $scrubbed{tags}     = scrub($payload->{tags});
     return \%scrubbed;

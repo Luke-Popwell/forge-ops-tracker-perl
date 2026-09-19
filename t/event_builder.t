@@ -28,6 +28,7 @@ subtest 'builds a payload with exception class, message, and configured metadata
     is($payload->{server_name}, 'web-1');
     is_deeply($payload->{context}, { url => 'https://example.com' });
     like($payload->{occurred_at}, qr/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    is($payload->{sdk_name}, 'perl');
 };
 
 subtest 'parses the file/line Perl itself appends to a plain die' => sub {
@@ -63,7 +64,7 @@ subtest 'marks a frame under app_root as in_app' => sub {
     my $error = $@;
 
     # die's auto-appended file location can come back either absolute or relative to the cwd
-    # `prove` was invoked from -- confirmed directly (it's relative here, not $Bin, when run via
+    # `prove` was invoked from: confirmed directly (it's relative here, not $Bin, when run via
     # `prove`), so app_root is derived from a real captured frame's own file value rather than
     # assumed to be $Bin (an absolute path FindBin computes independently of how die reports it).
     my $probe = ForgeOps::Tracker::EventBuilder->new($config)->build($error)->{backtrace};
@@ -105,10 +106,67 @@ subtest 'leaves the payload untouched when scrub_pii is disabled' => sub {
     is_deeply($payload->{context}, { email => 'ada@example.com' });
 };
 
+subtest 'includes the user when given one, never scrubbed even though it\'s an email' => sub {
+    my $builder = ForgeOps::Tracker::EventBuilder->new(new_configuration());
+    eval { die 'boom' };
+    my $payload = $builder->build($@, {}, { id => 42, email => 'ada@example.com' });
+
+    is_deeply($payload->{user}, { id => 42, email => 'ada@example.com' });
+};
+
+subtest 'omits the user key entirely when none was given' => sub {
+    my $builder = ForgeOps::Tracker::EventBuilder->new(new_configuration());
+    eval { die 'boom' };
+    my $payload = $builder->build($@);
+
+    ok(!exists $payload->{user});
+};
+
+subtest 'includes breadcrumbs when given' => sub {
+    my $builder = ForgeOps::Tracker::EventBuilder->new(new_configuration());
+    eval { die 'boom' };
+    my $crumb = { category => 'controller', message => 'GET /orders/42', level => 'info', timestamp => '2024-01-15T10:29:58Z', data => { status => 200 } };
+
+    my $payload = $builder->build($@, {}, undef, [$crumb]);
+
+    is_deeply($payload->{breadcrumbs}, [$crumb]);
+};
+
+subtest 'omits the breadcrumbs key entirely when none were given, or the list is empty' => sub {
+    my $builder = ForgeOps::Tracker::EventBuilder->new(new_configuration());
+    eval { die 'boom' };
+    my $error = $@;
+
+    ok(!exists $builder->build($error)->{breadcrumbs});
+    ok(!exists $builder->build($error, {}, undef, [])->{breadcrumbs});
+};
+
+subtest 'scrubs breadcrumb message and data but leaves category, level, and timestamp untouched' => sub {
+    my $builder = ForgeOps::Tracker::EventBuilder->new(new_configuration());
+    eval { die 'boom' };
+    my $crumb = {
+        category  => 'custom',
+        message   => 'emailed alice@example.com',
+        level     => 'info',
+        timestamp => '2024-01-15T10:29:58Z',
+        data      => { email => 'alice@example.com', password => 'hunter2' },
+    };
+
+    my $payload = $builder->build($@, {}, undef, [$crumb]);
+
+    my ($scrubbed) = @{ $payload->{breadcrumbs} };
+    is($scrubbed->{message}, 'emailed [EMAIL FILTERED]');
+    is($scrubbed->{category}, 'custom');
+    is($scrubbed->{level}, 'info');
+    is($scrubbed->{timestamp}, '2024-01-15T10:29:58Z');
+    is_deeply($scrubbed->{data}, { email => '[EMAIL FILTERED]', password => '[FILTERED]' });
+    is($crumb->{message}, 'emailed alice@example.com', 'the caller\'s own entry is not mutated');
+};
+
 # --- Source context capture -------------------------------------------------
 
 # Writes a small, real Perl fixture file where line $die_at_line is a `die "boom";` statement and
-# every other line is an inert comment -- so `do`-ing it produces a real error with Perl's own
+# every other line is an inert comment: so `do`-ing it produces a real error with Perl's own
 # auto-appended "at FILE line N." pointing at that exact line, with real, known content
 # surrounding it to assert against. The placeholder text is "filler N", not "line N": a comment of
 # the literal form "# line N" is a real Perl directive (like C's #line) that resets the line
@@ -131,7 +189,7 @@ sub die_and_capture {
 }
 
 # Builds a frame for $error under $config, deriving app_root from the error's own observed frame
-# file rather than assuming it matches the path used to write the fixture -- the same defensive
+# file rather than assuming it matches the path used to write the fixture: the same defensive
 # approach the "marks a frame under app_root as in_app" subtest above uses, since a fixture path
 # built from a temp-dir helper isn't guaranteed to come back byte-identical in a real backtrace.
 sub frame_for {

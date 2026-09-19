@@ -1,4 +1,4 @@
-# Build/test artifacts -- regenerated locally, not something CI or other developers need
+# Build/test artifacts: regenerated locally, not something CI or other developers need
 # committed, same reasoning as every other SDK's own .gitignore in this repo.
 blib/
 Makefile

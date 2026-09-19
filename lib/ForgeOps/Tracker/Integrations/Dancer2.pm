@@ -8,14 +8,14 @@ use ForgeOps::Tracker;
 
 # Dancer2 plugin. Named ForgeOps::Tracker::Integrations::Dancer2 rather than the ecosystem's usual
 # Dancer2::Plugin::* convention, to stay consistent with this repo's own
-# ForgeOps::Tracker::Integrations::* namespace (see Integrations/PSGI.pm) -- Dancer2 instantiates
+# ForgeOps::Tracker::Integrations::* namespace (see Integrations/PSGI.pm): Dancer2 instantiates
 # any package that `use Dancer2::Plugin;` and is itself `use`d from an app, regardless of
 # namespace, so this works exactly the same as a conventionally-named one:
 #
 #   use Dancer2;
 #   use ForgeOps::Tracker::Integrations::Dancer2;   # that's it, no further wiring
 #
-# Registers an on_route_exception hook -- Dancer2's own documented hook, fired whenever a route
+# Registers an on_route_exception hook: Dancer2's own documented hook, fired whenever a route
 # throws an exception that reaches Dancer2's own top-level handling, *before* Dancer2 renders its
 # error page. Reporting from a hook, rather than wrapping every route by hand, is what makes this
 # automatic with no per-route changes, the same "no further wiring" story every other framework
@@ -25,11 +25,30 @@ use ForgeOps::Tracker;
 sub BUILD {
     my ($plugin) = @_;
 
+    # A fresh breadcrumb trail per request: a prefork worker serves many requests in a row.
+    $plugin->app->add_hook(Dancer2::Core::Hook->new(
+        name => 'before_request',
+        code => sub { ForgeOps::Tracker::clear_breadcrumbs() },
+    ));
+
     $plugin->app->add_hook(Dancer2::Core::Hook->new(
         name => 'on_route_exception',
         code => sub {
             my ($app, $error) = @_;
             my $request = $app->request;
+            # Dancer2's after_request hook never fires for a request that raised (confirmed
+            # directly), so the performance plugin's own controller breadcrumb can't cover this
+            # case: record the failing request's own here, so the report below carries it.
+            if ($request) {
+                my $route = $request->route;
+                my $pattern = $route ? $route->spec_route : undef;
+                ForgeOps::Tracker::add_breadcrumb(
+                    $request->method . ' ' . (defined $pattern ? "$pattern" : $request->path),
+                    category => 'controller',
+                    level    => 'error',
+                    data     => { path => $request->path },
+                );
+            }
             ForgeOps::Tracker::report($error, {
                 path   => $request ? $request->path : undef,
                 method => $request ? $request->method : undef,
