@@ -229,6 +229,11 @@ parts of your app are actually slow, not just which ones raise). Counted in-proc
 a small periodic aggregate on a background thread, the same delivery philosophy as error
 reporting: a broken or unreachable tracker never affects the host app either way.
 
+Each aggregate also carries a small latency histogram (a count per fixed latency bucket: 50, 100,
+250, 500, 1000, 2500, 5000 and 10000ms, plus an overflow bucket), so ForgeOps can show an
+approximate p50/p95/p99 per transaction, not just an average. Percentiles are accurate to the width
+of whichever bucket a duration falls into; the SDK never stores the individual durations.
+
 ```perl
 # PSGI / Plack
 use Plack::Builder;
