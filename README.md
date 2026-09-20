@@ -1,6 +1,6 @@
 # ForgeOps::Tracker
 
-Perl error reporting client for a [ForgeOps](../../) instance. Zero
+Perl error reporting client for [ForgeOps](https://getforgeops.net). Zero
 non-core runtime dependencies: `HTTP::Tiny`, `JSON::PP`, `threads`, `threads::shared`,
 `Thread::Queue`, `POSIX`, `Cwd`, `Sys::Hostname`, and `Carp` are all part of core Perl (5.14+).
 `Plack` and `Dancer2` are only needed for their own optional integrations below.
