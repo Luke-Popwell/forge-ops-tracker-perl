@@ -296,6 +296,44 @@ trace something that is not a request, call `ForgeOps::Tracker::start_trace()` a
 `finish_trace($name, $started_at, $duration_ms)` yourself. A trace holds at most 500 spans. Configure
 with `track_tracing => 0` and `trace_capture_threshold => 2.5`.
 
+### Database spans with their SQL
+
+Wrap a query in a `database` span and pass its SQL as `statement`, and ForgeOps shows which
+statement a slow request spent its time in:
+
+```perl
+use DBI;
+use Plack::Builder;
+use ForgeOps::Tracker;
+
+ForgeOps::Tracker::init(dsn => $ENV{FORGE_OPS_DSN});
+my $dbh = DBI->connect('dbi:Pg:dbname=shop', '', '', { RaiseError => 1 });
+
+my $sql = "SELECT id FROM orders WHERE customer_id = ? AND status = 'open'";
+my $app = sub {
+    my ($env) = @_;
+    my ($customer_id) = ($env->{QUERY_STRING} || '') =~ /customer=(\d+)/;
+    my $ids = ForgeOps::Tracker::span('Load open orders',
+        sub { $dbh->selectcol_arrayref($sql, {}, $customer_id) },
+        kind => 'database', statement => $sql, db_system => 'postgresql');
+    return [200, ['Content-Type' => 'text/plain'], [join(',', @$ids)]];
+};
+
+builder {
+    enable '+ForgeOps::Tracker::Integrations::PSGIPerformance'; # starts and sends the trace
+    $app;
+};
+```
+
+The statement is masked before it's stored: every string and number becomes `?`, so this span
+carries `SELECT id FROM orders WHERE customer_id = ? AND status = ?`, and ForgeOps masks it again on
+arrival. It's cut to 4000 characters, and bind values (`$customer_id`) are never read. It goes out
+in the span's data as `db.statement`, with the database name (`postgresql`, `mysql`, `sqlite`,
+`mssql`, `oracle`, or any other; optional) lowercased as `db.system`. Both options are ignored on
+spans of any other kind. For a query you timed yourself, use
+`ForgeOps::Tracker::record_database_span($name, $sql, $started_at, $duration_ms, db_system =>
+'postgresql')`. A `db.statement` you put in a database span's `data` yourself is masked the same way.
+
 ### Following a request across services
 
 Traces use the [W3C Trace Context](https://www.w3.org/TR/trace-context/) standard (a `traceparent`

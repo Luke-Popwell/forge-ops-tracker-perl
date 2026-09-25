@@ -27,6 +27,7 @@ README.md
 t/changes.t
 t/client.t
 t/configuration.t
+t/database_span.t
 t/delivery_queue.t
 t/event_builder.t
 t/histogram_bucketer.t

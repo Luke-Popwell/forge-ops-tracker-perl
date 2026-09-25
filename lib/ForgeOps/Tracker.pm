@@ -24,7 +24,7 @@ use Time::HiRes ();
 # directly: retrying the identical 0.2.0 tarball came back 409 Conflict, not the original success
 # response repeated). No functional change from 0.2.0; this bump exists solely to get a fresh,
 # uploadable version number.
-our $VERSION = '0.10.0';
+our $VERSION = '0.11.0';
 
 my $configuration;
 my $reporter;
@@ -398,10 +398,24 @@ sub finish_trace {
 # database, redis, http, job, other (anything else is sent as "other"), e.g.:
 #
 #   my $order = ForgeOps::Tracker::span('charge card', sub { $gateway->charge($id) }, data => { order => $id });
+#
+# A database span can also carry the SQL it ran, with statement => and db_system =>:
+#
+#   my $rows = ForgeOps::Tracker::span('Load orders', sub { $dbh->selectall_arrayref($sql, {}, $id) },
+#       kind => 'database', statement => $sql, db_system => 'postgresql');
+#
+# The statement is masked (every string and number replaced by "?") and cut to 4000 characters
+# before it's stored, then sent as "db.statement"; db_system goes out lowercased as "db.system".
+# Bind values are never taken. Both options are ignored on any other kind of span.
 sub span {
     my ($name, $code, %options) = @_;
     my $trace = $current_trace;
     return $code->() unless $trace;
+
+    my $kind = defined $options{kind} ? $options{kind} : 'service';
+    my $data = $kind eq 'database'
+        ? { %{ $options{data} || {} }, %{ database_span_data($options{statement}, $options{db_system}) } }
+        : $options{data};
 
     my $wantarray = wantarray;
     my $id = $trace->open_span;
@@ -417,10 +431,7 @@ sub span {
         };
         $error = $@;
     }
-    $trace->finish(
-        $id, $name, defined $options{kind} ? $options{kind} : 'service',
-        $started_at, (Time::HiRes::time - $started_at) * 1000, $options{data},
-    );
+    $trace->finish($id, $name, $kind, $started_at, (Time::HiRes::time - $started_at) * 1000, $data);
     die $error if $failed;
     return $wantarray ? @result : $result[0];
 }
@@ -483,6 +494,29 @@ sub record_span {
     my ($name, $kind, $started_at, $duration_ms, $data) = @_;
     $current_trace->record_leaf($name, $kind, $started_at, $duration_ms, $data) if $current_trace;
     return;
+}
+
+# record_database_span($name, $statement, $started_at, $duration_ms, db_system => ...): a query you
+# timed yourself, recorded as a "database" span carrying its SQL, masked as span() masks it. Does
+# nothing outside a trace.
+sub record_database_span {
+    my ($name, $statement, $started_at, $duration_ms, %options) = @_;
+    record_span($name, 'database', $started_at, $duration_ms, database_span_data($statement, $options{db_system}));
+    return;
+}
+
+# database_span_data($statement, $db_system): the data a database span carries, "db.statement"
+# and "db.system" (lowercased), each left out when undef or blank. A "db.statement" on any database
+# span is masked when the span is recorded, however its data was built.
+sub database_span_data {
+    my ($statement, $db_system) = @_;
+    my %data;
+    $data{'db.statement'} = $statement if defined $statement && !ref $statement && $statement =~ /\S/;
+    if (defined $db_system && !ref $db_system && $db_system =~ /\S/) {
+        (my $system = lc $db_system) =~ s/\A\s+|\s+\z//g;
+        $data{'db.system'} = $system;
+    }
+    return \%data;
 }
 
 # capture_metric($name, $value = 1): records a named business metric (a signup, a payment, anything

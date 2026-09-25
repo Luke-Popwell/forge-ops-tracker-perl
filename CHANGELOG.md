@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0 (2026-09-25)
+
+- A database span can now carry the SQL it ran: `ForgeOps::Tracker::span('Load orders', sub { ... }, kind => 'database', statement => $sql, db_system => 'postgresql')`, plus `record_database_span($name, $sql, $started_at, $duration_ms, db_system => ...)` for a query you timed yourself. The statement is masked (every string and number becomes `?`) and cut to 4000 characters before it's stored, then sent in the span's data as `db.statement`, with `db_system` lowercased as `db.system`. Bind values are never read. Both options are ignored on spans of any other kind, and a `db.statement` put in a database span's `data` directly is masked too.
+
 ## 0.10.0 (2026-09-25)
 
 - New `ForgeOps::Tracker::record_change(kind => ..., title => ..., details => {...}, environment => ..., service => ..., actor => ..., url => ..., id => ..., occurred_at => ...)` records something that changed in your system (a feature flag, a config value, a hand-run migration) so ForgeOps can show it next to the errors that followed. `kind` is one of `feature_flag`, `config`, `migration`, `dependency`, `infrastructure`, or `other`; anything else is sent as `other`. Delivered from a background thread like error events, never dies, and does nothing when the client isn't enabled.
