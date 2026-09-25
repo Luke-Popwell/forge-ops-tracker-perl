@@ -395,6 +395,53 @@ succeeds, since a plan without the feature rejects every flush and would otherwi
 as the process lives. A NaN, infinite or non-numeric value is dropped at capture. Requires a ForgeOps
 plan that includes custom metrics / infrastructure monitoring.
 
+## What changed
+
+ForgeOps can show what changed in your system next to the errors and slowdowns that followed it.
+Two ways in:
+
+**Record a change yourself** when something changes that no deploy captures, like a feature flag
+flipped, a config value edited, or a migration run by hand:
+
+```perl
+ForgeOps::Tracker::record_change(
+    kind    => 'feature_flag',   # feature_flag, config, migration, dependency, infrastructure, or other
+    title   => 'Enabled new_checkout for 10% of users',
+    details => { flag => 'new_checkout', rollout_percent => 10 },
+    actor   => 'ops@example.com',
+    url     => 'https://flags.example.com/new_checkout',
+);
+```
+
+`kind` and `title` are required; `details` (a hashref), `environment` (defaults to the configured
+one), `service`, `actor`, `url`, `id` (an idempotency key, so sending the same change twice records
+it once), and `occurred_at` (an ISO 8601 string or epoch seconds, defaulting to now) are optional.
+An unknown `kind` is sent as `other`. It's queued for the same kind of background thread as error
+events, so it never slows down the caller, never dies, and does nothing when the client isn't
+enabled for the environment.
+
+**Changes between deploys are detected for you.** Once per process, `init()` queues a snapshot of
+what the process is running for that background thread: the Perl version. ForgeOps compares it with
+the previous boot's and records whatever changed. Module versions aren't included: Perl has no
+single reliable record of which versions an app runs, and the snapshot leaves out anything it would
+have to guess at.
+
+```perl
+ForgeOps::Tracker::init(
+    dsn                 => 'https://<api_key>@getforgeops.net/api/v1/events',
+    detect_changes      => 1,   # default; 0 sends no startup snapshot
+    track_env_var_names => 0,   # default; 1 also sends environment variable names
+);
+```
+
+With `track_env_var_names` on, the snapshot lists the names of your environment variables (never
+their values), so an added or removed variable shows up as a change. Names that differ from host to
+host, like `HOSTNAME`, `PATH`, `PORT`, `LC_*`, and Kubernetes service variables, are left out, as
+are the client's own `FORGE_OPS_*` settings.
+
+Requires a ForgeOps plan that includes change tracking; on a plan that doesn't, both are rejected
+server-side and dropped, exactly like any other delivery failure.
+
 ## Database errors
 
 Perl has no exception type that carries the statement, but DBI puts it in the error text as `[for Statement "SELECT ..."]` when the handle has `ShowErrorStatement` turned on (DBIx::Class turns it on for you), and SQLite's own errors end `while compiling: ...`. This client reads the statement out of that text (never the `with ParamValues:` part, which is the values), so the event includes the names of the stored procedure, table and view it touched, and the issue tells you where to start looking. This is on by default and sends identifiers only, never values.
