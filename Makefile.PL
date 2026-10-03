@@ -5,9 +5,10 @@ use ExtUtils::MakeMaker;
 # Real deps come from the cpanfile (this repo's own source of truth for what "cpanm --installdeps
 # ." needs while developing against sdks/perl directly), not duplicated here by hand, but PAUSE
 # indexing and `cpan ForgeOps::Tracker` both go through this file's own PREREQ_PM/TEST_REQUIRES,
-# which CPAN's toolchain has no way to read a cpanfile for on its own. Zero runtime dependencies:
-# HTTP::Tiny, JSON::PP, threads/threads::shared/Thread::Queue, POSIX, Cwd, Sys::Hostname, and Carp
-# are all core Perl 5.14+, the version floor below.
+# which CPAN's toolchain has no way to read a cpanfile for on its own. HTTP::Tiny, JSON::PP,
+# threads/threads::shared/Thread::Queue, POSIX, Cwd, Sys::Hostname, and Carp are all core Perl
+# 5.14+, the version floor below. The two runtime prerequisites are what HTTP::Tiny needs to speak
+# https, which a ForgeOps DSN always is; the versions are HTTP::Tiny's own minimums.
 WriteMakefile(
     NAME             => 'ForgeOps::Tracker',
     AUTHOR           => 'ForgeOps <support@getforgeops.net>',
@@ -15,7 +16,10 @@ WriteMakefile(
     ABSTRACT_FROM    => 'lib/ForgeOps/Tracker.pm',
     LICENSE          => 'mit',
     MIN_PERL_VERSION => '5.014',
-    PREREQ_PM        => {},
+    PREREQ_PM        => {
+        'IO::Socket::SSL' => '1.42',
+        'Net::SSLeay'     => '1.49',
+    },
     # Test-only: Plack, for the local HTTP server the delivery tests post to (HTTP::Server::PSGI,
     # t/lib/EchoServer.pm) and for Plack::Test/Plack::Builder in the PSGI and tracing tests;
     # HTTP::Message (already one of Plack's own prerequisites, so no extra download) for

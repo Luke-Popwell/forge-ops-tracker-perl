@@ -24,7 +24,7 @@ use Time::HiRes ();
 # directly: retrying the identical 0.2.0 tarball came back 409 Conflict, not the original success
 # response repeated). No functional change from 0.2.0; this bump exists solely to get a fresh,
 # uploadable version number.
-our $VERSION = '0.12.2';
+our $VERSION = '0.12.3';
 
 my $configuration;
 my $reporter;
@@ -33,6 +33,7 @@ my $span_queue;
 my $change_queue;
 my $change_snapshot_sent = 0;
 my $environment_warning_given = 0;
+my $https_warning_given = 0;
 my ($metric_buffer, $infrastructure_metric_buffer);
 
 # The affected user set via set_user() below, if any: a plain package variable, the same
@@ -192,6 +193,7 @@ sub init {
     }
 
     _warn_once_if_environment_is_not_enabled($config);
+    _warn_once_if_https_is_unavailable($config);
     _start_change_snapshot($config);
 
     return $config;
@@ -212,6 +214,30 @@ sub _warn_once_if_environment_is_not_enabled {
     my $list = join ', ', sort grep { $enabled{$_} } keys %enabled;
     my $message = qq{[ForgeOps] Not sending: this environment is "$environment", and only $list are enabled. }
         . qq{Set FORGE_OPS_ENVIRONMENT=production (or add "$environment" to the enabled environments) to send from here.};
+    if ($config->{logger}) {
+        $config->log($message);
+    } else {
+        warn "$message\n";
+    }
+    return;
+}
+
+# A ForgeOps DSN is https, and HTTP::Tiny can only speak https with IO::Socket::SSL and Net::SSLeay
+# installed, which aren't core Perl. Without them every delivery fails quietly inside the client,
+# which looks exactly like a broken setup. They're prerequisites from 0.12.3 on, so this is for a
+# perl where they were removed, or the SDK was copied in rather than installed. Said once per
+# process, the same way as the environment warning. Never without a DSN, or for an http one.
+sub _warn_once_if_https_is_unavailable {
+    my ($config) = @_;
+    return if $https_warning_given;
+    return unless defined $config->{dsn} && $config->{dsn} =~ m{^https://}i;
+    return unless HTTP::Tiny->can('can_ssl');
+    my ($ok) = HTTP::Tiny->can_ssl;
+    return if $ok;
+
+    $https_warning_given = 1;
+    my $message = q{[ForgeOps] Not sending: the DSN is https, and this perl can't make https requests. }
+        . q{Install IO::Socket::SSL and Net::SSLeay (cpanm IO::Socket::SSL Net::SSLeay) to send.};
     if ($config->{logger}) {
         $config->log($message);
     } else {
@@ -610,6 +636,7 @@ sub _reset_for_testing {
     $change_queue = undef;
     $change_snapshot_sent = $options{change_snapshot} ? 0 : 1;
     $environment_warning_given = 0;
+    $https_warning_given = 0;
     $configuration = undef;
     $reporter = undef;
     $performance_flusher = undef;

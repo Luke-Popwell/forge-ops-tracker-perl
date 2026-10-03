@@ -1,9 +1,12 @@
 # ForgeOps::Tracker
 
-Perl error reporting client for [ForgeOps](https://getforgeops.net). Zero
-non-core runtime dependencies: `HTTP::Tiny`, `JSON::PP`, `threads`, `threads::shared`,
-`Thread::Queue`, `POSIX`, `Cwd`, `Sys::Hostname`, and `Carp` are all part of core Perl (5.14+).
-`Plack` and `Dancer2` are only needed for their own optional integrations below.
+Perl error reporting client for [ForgeOps](https://getforgeops.net). Almost everything it uses
+is core Perl (5.14+): `HTTP::Tiny`, `JSON::PP`, `threads`, `threads::shared`, `Thread::Queue`,
+`POSIX`, `Cwd`, `Sys::Hostname`, and `Carp`. The two exceptions are `IO::Socket::SSL` and
+`Net::SSLeay`, which `HTTP::Tiny` needs to send over https, as a ForgeOps DSN always is; `cpanm`
+installs them with the client. If they're missing, `init()` says so in one line starting
+`[ForgeOps] Not sending`. `Plack` and `Dancer2` are only needed for their own optional
+integrations below.
 
 ## Installation
 

@@ -1,7 +1,11 @@
 requires 'perl', '5.014';
 
 # HTTP::Tiny, JSON::PP, threads, threads::shared, Thread::Queue, POSIX, Cwd, Sys::Hostname, and
-# Carp are all core: this SDK has zero runtime dependencies beyond core Perl.
+# Carp are all core. The only runtime dependencies beyond core Perl are the two modules HTTP::Tiny
+# needs to speak https, which a ForgeOps DSN always is: without them nothing can be delivered. The
+# versions are HTTP::Tiny's own minimums. Kept in step with Makefile.PL's PREREQ_PM.
+requires 'IO::Socket::SSL', '1.42';
+requires 'Net::SSLeay', '1.49';
 
 on 'test' => sub {
     requires 'Test::More', '0.98';

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.3 (2026-10-03)
+
+- `IO::Socket::SSL` (1.42+) and `Net::SSLeay` (1.49+) are now prerequisites, so `cpanm ForgeOps::Tracker` installs them. `HTTP::Tiny` needs both to send over https, which a ForgeOps DSN always is, and neither is core Perl: on a perl without them the client installed cleanly and then delivered nothing, without saying why.
+- When the DSN is https and this perl can't make https requests, `init()` now logs one line, once per process, through `logger` (or `warn` when no logger is set): `[ForgeOps] Not sending: the DSN is https, and this perl can't make https requests. Install IO::Socket::SSL and Net::SSLeay (cpanm IO::Socket::SSL Net::SSLeay) to send.`
+
 ## 0.12.2 (2026-10-02)
 
 - `cpanm ForgeOps::Tracker` now passes its own tests on a clean Perl. The tests' local HTTP server needs `HTTP::Server::PSGI`, and several tests use `Plack::Test`, but only `Test::More` was listed as a test requirement, so the install failed. `Plack` and `HTTP::Message` (already one of Plack's prerequisites) are now in `TEST_REQUIRES` and the cpanfile's test requirements. They are still not runtime dependencies. Dancer2 stays optional: the Dancer2 integration tests, and the Dancer2 part of the trace context tests, now skip when it isn't installed.
