@@ -45,6 +45,15 @@ ForgeOps::Tracker::init(
 
 Call `init()` once at startup. Any `Configuration` field can be overridden by name.
 
+`environment` defaults to `FORGE_OPS_ENVIRONMENT`, else `production`. Only `production` and
+`staging` send by default (`enabled_environments`). With a DSN set and any other environment,
+`init()` logs one line, once per process, through `logger` (or `warn`, to stderr, when no logger is
+set), and nothing is sent:
+
+```
+[ForgeOps] Not sending: this environment is "development", and only production, staging are enabled. Set FORGE_OPS_ENVIRONMENT=production (or add "development" to the enabled environments) to send from here.
+```
+
 ### PSGI / Plack
 
 ```perl
@@ -276,8 +285,7 @@ ForgeOps::Tracker::init(
 ```
 
 Requires a ForgeOps plan that includes performance monitoring; on a plan that doesn't, the
-periodic flushes are simply rejected server-side and dropped, exactly like any other delivery
-failure.
+periodic flushes are accepted but not recorded, and the response says why.
 
 ## Distributed tracing
 
@@ -491,8 +499,8 @@ their values), so an added or removed variable shows up as a change. Names that 
 host, like `HOSTNAME`, `PATH`, `PORT`, `LC_*`, and Kubernetes service variables, are left out, as
 are the client's own `FORGE_OPS_*` settings.
 
-Requires a ForgeOps plan that includes change tracking; on a plan that doesn't, both are rejected
-server-side and dropped, exactly like any other delivery failure.
+Requires a ForgeOps plan that includes change tracking; on a plan that doesn't, both are accepted but not recorded,
+and the response says why.
 
 ## Database errors
 
@@ -519,6 +527,11 @@ database's own error message usually settles which it was.
 
 ```bash
 cd sdks/perl
-cpanm --installdeps --with-recommends .   # pulls in Plack/Dancer2 for the integration tests too
+cpanm --installdeps --with-recommends .   # Plack (a test requirement), plus Dancer2 for its integration tests
 prove -l t/
 ```
+
+The tests need Plack (and HTTP::Message, which Plack already depends on): the delivery tests post to
+a local `HTTP::Server::PSGI`. Both are listed in `TEST_REQUIRES`, so `cpanm ForgeOps::Tracker`
+installs them to run the tests, never as runtime dependencies. Without Dancer2, its integration tests
+skip themselves.
