@@ -12,7 +12,7 @@ use ForgeOps::Tracker;
 use ForgeOps::Tracker::Configuration;
 use ForgeOps::Tracker::EventBuilder;
 use ForgeOps::Tracker::PerformanceFlusher;
-use ForgeOps::Tracker::StrictPrivacy qw(normalize_message message_fingerprint span_name transaction_name path_without_ids);
+use ForgeOps::Tracker::StrictPrivacy qw(normalize_message message_fingerprint span_name transaction_name strict_path);
 
 # A byte-identical copy of sdks/strict_privacy_vectors.json, generated from the server's own
 # StrictPrivacy; every SDK checks itself against the same file.
@@ -38,21 +38,21 @@ subtest 'names every span vector exactly as the server does' => sub {
     is(span_name($_->{name}), $_->{strict}, $_->{name}) for @{ $vectors->{span_name} };
 };
 
-subtest 'strips ids from every path vector exactly as the server does' => sub {
-    is(path_without_ids($_->{path}), $_->{strict}, $_->{path} eq '' ? '(empty)' : $_->{path}) for @{ $vectors->{path} };
+subtest 'reduces every path vector exactly as the server does' => sub {
+    is(strict_path($_->{path}), $_->{strict}, $_->{path} eq '' ? '(empty)' : $_->{path}) for @{ $vectors->{path} };
 };
 
-subtest 'transaction_name keeps a route and strips ids from a raw path' => sub {
+subtest 'transaction_name keeps a route and cuts a raw path down to its first segment' => sub {
     is(transaction_name('GET /patients/:id'), 'GET /patients/:id');
-    is(transaction_name('GET /patients/8821'), 'GET /patients/:id');
+    is(transaction_name('GET /patients/8821'), 'GET /patients/:path');
     is(transaction_name('MyApp::Patients::show'), 'MyApp::Patients::show');
     is(transaction_name(undef), undef);
 };
 
-subtest 'an event with strict privacy on strips ids from a raw-path transaction_name' => sub {
+subtest 'an event with strict privacy on cuts down a raw-path transaction_name' => sub {
     my $payload = ForgeOps::Tracker::StrictPrivacy::event({ message => 'boom', backtrace => [], transaction_name => 'GET /patients/8821' });
 
-    is($payload->{transaction_name}, 'GET /patients/:id');
+    is($payload->{transaction_name}, 'GET /patients/:path');
 };
 
 # Stands in for the Client: keeps every batch of performance samples flush() delivers.
@@ -61,7 +61,7 @@ package Fake::PerformanceClient {
     sub deliver_performance_samples { my ($self, $samples) = @_; push @{ $self->{delivered} }, @$samples; return 1 }
 }
 
-subtest 'performance samples strip ids from raw-path names only with strict privacy on' => sub {
+subtest 'performance samples cut down raw-path names only with strict privacy on' => sub {
     for my $strict (1, 0) {
         my $config = ForgeOps::Tracker::Configuration->new;
         $config->{dsn} = 'https://key@tracker.example.com/api/v1/events';
@@ -77,7 +77,7 @@ subtest 'performance samples strip ids from raw-path names only with strict priv
         $flusher->flush;
 
         my @names = sort map { $_->{transaction_name} } @{ $client->{delivered} };
-        is_deeply(\@names, $strict ? ['GET /patients/:id'] : ['GET /patients/8821', 'GET /patients/:id'], $strict ? 'strict on' : 'strict off');
+        is_deeply(\@names, $strict ? ['GET /patients/:id', 'GET /patients/:path'] : ['GET /patients/8821', 'GET /patients/:id'], $strict ? 'strict on' : 'strict off');
     }
 };
 
@@ -262,7 +262,7 @@ subtest 'spans with strict privacy on name calls by host and keep only statement
     is($spans->{http}{name}, 'GET api.example.com');
     ok(!exists $spans->{http}{data});
     is_deeply($spans->{database}{data}, { 'db.statement' => 'SELECT * FROM patients WHERE id = ?', 'db.system' => 'postgresql' });
-    is($spans->{controller}{name}, 'GET /patients/:id');
+    is($spans->{controller}{name}, 'GET /patients/:path');
     ok(!exists $spans->{controller}{data});
 };
 

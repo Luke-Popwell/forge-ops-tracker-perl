@@ -25,7 +25,7 @@ use Time::HiRes ();
 # directly: retrying the identical 0.2.0 tarball came back 409 Conflict, not the original success
 # response repeated). No functional change from 0.2.0; this bump exists solely to get a fresh,
 # uploadable version number.
-our $VERSION = '0.14.0';
+our $VERSION = '0.15.0';
 
 my $configuration;
 my $reporter;
@@ -441,8 +441,8 @@ sub finish_trace {
 
     my $payload = $trace->finish_trace($name, $started_at, $duration_ms, $errored);
     # Under strict privacy every span goes through StrictPrivacy::span: an outbound call named by
-    # its method and host only, a root span named by its raw path (the PSGI integration's
-    # "GET /patients/42") with its ids taken out, and no span data but the masked statement and
+    # its method and host only, a root span named by its raw path (the PSGI integration's "GET
+    # /patients/42") cut down to its first segment, and no span data but the masked statement and
     # db.system.
     if ($payload && _configuration()->{strict_privacy}) {
         $payload->{spans} = [ map { ForgeOps::Tracker::StrictPrivacy::span($_) } @{ $payload->{spans} } ];

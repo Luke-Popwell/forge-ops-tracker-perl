@@ -262,10 +262,11 @@ email or a diagnosis:
 - Context and tags only keep the top-level keys you list in `privacy_allowed_fields`, and only
   when the value is a plain string or number (or a JSON boolean). Nothing else from them is sent.
 - Spans: an outbound call is named by method and host only (`GET api.example.com`), a request
-  named by its raw path (the PSGI integration's `GET /patients/42`) has the ids taken out
-  (`GET /patients/:id`), and span data keeps only the masked `db.statement` and `db.system`.
-- The same goes for the `transaction_name` in error events and performance samples: a raw path
-  loses its ids, a route pattern is kept as it is.
+  named by its raw path (the PSGI integration's `GET /patients/jane-doe/12`) keeps only the first
+  segment (`GET /patients/:path`; a first segment with a digit becomes `:id`), and span data keeps
+  only the masked `db.statement` and `db.system`.
+- The same goes for the `transaction_name` in error events and performance samples. A route
+  pattern such as `/patients/:id` (Dancer2's) is kept as it is.
 
 ```perl
 ForgeOps::Tracker::init(

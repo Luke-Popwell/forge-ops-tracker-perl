@@ -17,7 +17,7 @@ use Scalar::Util qw(blessed);
 # The same rules as the server's own StrictPrivacy (app/services/strict_privacy.rb), which applies
 # them again on arrival when the project's Strict privacy setting is on;
 # sdks/strict_privacy_vectors.json pins the results both have to agree on, byte for byte.
-our @EXPORT_OK = qw(normalize_message message_fingerprint event span span_name transaction_name path_without_ids);
+our @EXPORT_OK = qw(normalize_message message_fingerprint event span span_name transaction_name strict_path);
 
 use constant FINGERPRINT_LENGTH => 32;
 
@@ -33,6 +33,7 @@ my $NUMBER        = qr/(?<![$WORD])[0-9]+(?![$WORD])/;
 my @SPAN_DATA_KEYS = ('db.statement', 'db.system');
 my $HTTP_METHOD    = qr/\A(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)/i;
 my $SCHEME         = qr{\A[a-z][a-z0-9+.-]*://}i;
+my $ROUTE_PARAMETER = qr/\A(?::.+|\{.+\}|<.+>|\[.+\]|\*.*)\z/;
 
 # Error event fields that are never sent, and the per-frame source context.
 my @EVENT_FIELDS_DROPPED  = qw(message breadcrumbs endpoint sql_statement);
@@ -111,33 +112,47 @@ sub span {
 sub span_name {
     my ($name) = @_;
     return $name unless defined $name;
-    return path_without_ids($name) if index($name, '/') == 0;
+    return strict_path($name) if index($name, '/') == 0;
     return $name unless $name =~ $HTTP_METHOD;
 
     my ($method, $target) = (uc $1, $2);
-    return "$method " . path_without_ids($target) if index($target, '/') == 0;
+    return "$method " . strict_path($target) if index($target, '/') == 0;
     my $host = _host($target);
-    return "$method " . (defined $host ? $host : path_without_ids($target));
+    return "$method " . (defined $host ? $host : strict_path($target));
 }
 
-# transaction_name($name): which request something happened in: a route or a handler name is
-# kept, but a raw path (PSGI's "GET /patients/42") has its ids stripped, by the span name rule.
+# transaction_name($name): which request something happened in: a route or a handler name is kept,
+# but a raw path (PSGI's "GET /patients/42") keeps only its first segment, by the span name rule.
 sub transaction_name {
     my ($name) = @_;
     return defined $name && length $name ? span_name($name) : $name;
 }
 
-# path_without_ids($path): a path with every segment that holds a digit, or is long enough to be a
-# token or a name slug, replaced by ":id"; no query or fragment. "/patients/42/notes?q=x" is
-# "/patients/:id/notes".
-sub path_without_ids {
+# strict_path($path): A request or page path under strict privacy, with no query or fragment. A
+# route template ("/patients/:id/notes", "/patients/{id}", "users/<int:id>/", "/files/*path",
+# "/posts/[slug]") is kept as it is: its words are a developer's, and its parameters are already
+# placeholders. A raw path keeps only its first segment, and the rest becomes ":path":
+# "/patients/jane-doe/12" is "/patients/:path". Anything after the first segment of a raw path could
+# name a person, and no rule can tell a name from a word ("/patients/janedoe"). A first segment that
+# holds a digit or is over 40 characters is ":id" itself.
+sub strict_path {
     my ($path) = @_;
     $path = defined $path ? "$path" : '';
     $path =~ s/[?#].*\z//s;
-    # split drops trailing empty fields, the same as Ruby's String#split the server uses.
-    my @segments = map { /[0-9]/ || length($_) > 40 ? ':id' : $_ } split m{/}, $path;
-    my $joined = join '/', @segments;
-    return length $joined ? $joined : '/';
+    return $path if _is_route_template($path);
+
+    my $leading = index($path, '/') == 0 ? '/' : '';
+    my @segments = grep { length } split m{/}, $path;
+    return '/' unless @segments;
+
+    my $first = $segments[0] =~ /[0-9]/ || length($segments[0]) > 40 ? ':id' : $segments[0];
+    return $leading . $first . (@segments > 1 ? '/:path' : '');
+}
+
+# Whether any segment is a route parameter: ":id", "{id}", "<int:id>", "[slug]" or "*path".
+sub _is_route_template {
+    my ($path) = @_;
+    return scalar grep { $_ =~ $ROUTE_PARAMETER } split m{/}, $path;
 }
 
 # An outbound call's host, read by hand rather than with a URL parser (an address a parser rejects
